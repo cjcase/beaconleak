@@ -1,0 +1,35 @@
+╭─root@redb0x ~null/code/beaconleak  ‹master*› 
+╰─# python beaconleak.py --mon --debug wi7mon                                                                                                                                        
+
+     _                       __            _
+    | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
+    | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
+    |___|___|__,|___|___|_|_|_____|___|__,|_,_|
+                               by cjcase [v0.7]
+
+    
+[*] Starting live monitoring mode
+[!] BEACON STUFFING DETECTED (SSID:linksys Reserved Element 253)
+[1] Data: 01
+[!] BEACON STUFFING DETECTED (SSID:linksys Reserved Element 254)
+[2] Data: 7c477dece517318ad0334eb78b5f2a8e74eba832c7ad3718a774dff2c8290b043c2be3a2131dfb19260c7b340c5771118773435c0cb07868ae5a0a641de938aa5d24
+(...)
+[!] BEACON STUFFING DETECTED (SSID:linksys Reserved Element 253)
+[195] Data: 01
+[!] BEACON STUFFING DETECTED (SSID:linksys Reserved Element 254)
+[196] Data: 7c477dece517318ad0334eb78b5f2a8e74eba832c7ad3718a774dff2c8290b043c2be3a2131dfb19260c7b340c5771118773435c0cb07868ae5a0a641de938aa5d24
+
+Distance: <1m
+Attacking Card:
+03:00.0 Network controller: Intel Corporation Centrino Advanced-N 6205 [Taylor Peak] (rev 34)
+Detecting Card:
+Bus 002 Device 017: ID 148f:3070 Ralink Technology, Corp. RT2870/RT3070 Wireless Adapter
+Total Stuffed Packets Transmitted:
+100 (200 Elements)
+Total Detected:
+196
+Success Rate:
+98%
+
+
+

