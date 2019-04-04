@@ -80,7 +80,7 @@ class beaconleak():
     def beacon_craft(self, msg):
         # general case
         # TODO add type/structure definition to class
-        _type = Dot11Elt(ID=253, info='\x01', len=1) # c2 type
+        _type = Dot11Elt(ID=253, info='\x01', len=1) # DEPRECATED: c2 type
         _stuff = Dot11Elt(ID=254, info=msg, len=len(msg))
         if not self.covert:
             rates = b'\x82\x84\x0b\x16'
@@ -107,9 +107,9 @@ class beaconleak():
             _ssid = Dot11Elt(ID='SSID', info=self.ssid, len=len(self.ssid))
             _rsninfo = Dot11Elt(ID='RSNinfo', info=rsninfo, len=len(rsninfo))
             _rates = Dot11Elt(ID="Rates", info=rates, len=len(rates))
-            frame = RadioTap() / dot11 / beacon / _ssid / _rates / _rsninfo / _type / _stuff
+            frame = RadioTap() / dot11 / beacon / _ssid / _rates / _rsninfo / _stuff
         else:
-            frame = self.covert_frame / _type / _stuff
+            frame = self.covert_frame / _stuff
         return frame
         
     def push_cmd(self, cmd, reply=True):
@@ -132,7 +132,7 @@ class beaconleak():
                 # print("[d] sniff filter:\n{}".format(bpf))
             sendp(frame, iface=self.iface, inter=0.100, loop=0, verbose=int(self.debug))
             if reply:
-                sniff(iface=self.iface, stop_filter=self.response, timeout=self.delay)
+                sniff(iface=self.iface, stop_filter=self.response, timeout=self.delay, monitor=True)
         except Exception as e:
             if self.debug:
                 print("[d] error:\n{}".format(str(e)))
@@ -182,22 +182,22 @@ class beaconleak():
 
 
     def response(self, frame):
-        if frame.haslayer(Dot11Elt):
-            t = frame[Dot11Elt][3].ID
-            if frame.addr2 == self.bssid and t == 128:
-                crypted = frame[Dot11Elt][4].info
-                if self.debug:
-                    print("[d] response frame:\n{}".format(frame.command()))
-                    print("[d] received:{}".format(crypted.hex()))
-                try:                    
-                    msg = self.box.decrypt(crypted)
-                    print(msg.decode('utf-8'))
-                except Exception as e:
-                    print("[e] Could not decrypt, wrong PSK or error in received beacon!")
-                    if self.debug:
-                        print("[d] error:\n" + str(e))
-                return True
-
+        # TODO: implement covert logic
+        if frame.haslayer(Dot11Beacon):
+            if frame.addr2 == self.bssid:
+                i = 0
+                elements = frame
+                while elements:
+                    if elements.ID == 128:
+                        if self.debug:
+                            print("[d] response frame:\n{}".format(frame.command()))
+                            print("[d] received:{}".format(elements.info.hex()))
+                        crypted = elements.info
+                        msg = dec_payload(crypted)
+                        print(msg.decode('utf-8'))
+                    i = i + 1
+                    elements = elements.payload
+  
 
     def dec_payload(self, enc):
         c = ''
@@ -277,7 +277,6 @@ class beaconleak():
                 print("[d] error: {}".format(str(e)))
         
 
-
     def clone(self, frame):
         if frame.haslayer(Dot11Beacon):
             try:
@@ -338,7 +337,7 @@ class beaconleak():
 
     def check_iface(self):
         try:
-            sniff(iface=self.iface, count=1, monitor=True)
+            sniff(iface=self.iface, count=1)
         except OSError:
             print("[e] interface {i} not found, did you mean {i}mon?".format(i=self.iface))
             return False
