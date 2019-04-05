@@ -1,0 +1,14 @@
+Python 3.7.3 (default, Mar 26 2019, 21:43:19) 
+[GCC 8.2.1 20181127] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+>>> import nacl.pwhash
+>>> import nacl.secret
+>>> enc = "0a80de70ab7fb38391882a2ca1ece87f2f9bd19b26ae530274e9db43e51e70436955469b6e40fd086b5455bcad29fc28"
+>>> salt = b'beaconleak::salt'
+>>> key = nacl.pwhash.argon2i.kdf(32, b'secret', salt)
+>>> key
+b'\xc2b\x1d\xb00\xf3\xf8H\xa5~\xbf\xa2\xe3d\xda?\xde\x90\x83\xc8\xaffb\xe5D\x95\xe3.\t\x94\xe4\xe2'
+>>> box = nacl.secret.SecretBox(key)
+>>> box.decrypt(bytes.fromhex(enc))
+b'uname -a'
+>>> 

