@@ -250,6 +250,7 @@ class beaconleak():
     # TODO stuff element 221 for maximum lulz
     def magic(self, frame):
         if frame.haslayer(Dot11Beacon):
+            # TODO add option for known bssid or delete option from arguments
             i = 0
             elements = frame
             while elements:
@@ -386,7 +387,7 @@ if __name__ == '__main__':
         action='store_true'
     )
     mutex.add_argument(
-        '--mon',
+        '--detect',
         help='(detect) Check surroundings for possible attacks',
         action='store_true'
     )
@@ -395,33 +396,44 @@ if __name__ == '__main__':
         help='(attack) Command & control, remote shell',
         action='store_true'
     )
-    optional_arguments = {
-        '--covert': 'Hide in plain sight by mimicking surrounding beacons',
-        '--autohop': '(Linux only) Automatic channel hop for detection mode',
-        '--debug': 'Debug verbosity.',
-    }
-    for arg, txt in optional_arguments.items():
-        parse.add_argument(arg, help=txt, action='store_true')
 
-    # extra options
-    parse.add_argument('--ssid', 
+    # arguments per mode
+    detect_opts = parse.add_argument_group('detection mode options')
+    c2_opts = parse.add_argument_group('c2 and leak mode options')
+
+    # detection mode options
+    detect_opts.add_argument('--pcap', 
+        nargs='+',
+        help='pcap file(s) for offline beacon analysis'
+    )
+    detect_opts.add_argument('--autohop',
+        help='(Linux only) Automatic channel hopping',
+        action='store_true'
+    )
+    detect_opts.add_argument('--loglevel', help='log level, lowest is critical') # TODO
+    
+    # c2 mode options
+    c2_opts.add_argument('--covert',
+        help='Be extra sneaky by mimicking surrounding beacons',
+        action='store_true'
+    )
+    c2_opts.add_argument('--psk', help='Custom encryption passphrase')
+    c2_opts.add_argument('--ssid', 
         help='Emulated station WiFi name',
         default='linksys'
     )
-    parse.add_argument('--bssid', 
+    c2_opts.add_argument('--bssid', 
         help='Emulated station MAC address',
         default='00:14:bf:de:ad:c0'
     )
-    parse.add_argument('--psk', help='Custom encryption passphrase')
-    parse.add_argument('--pcap', nargs='+', help='pcap file(s) for offline beacon analysis')
-    parse.add_argument('--delay',
+    c2_opts.add_argument('--delay',
         type=lambda x: int(x) if x and x.isdigit() else None,
         default=5,
-        help='(c2 mode) delay to sniff for output response [default=5]'
+        help='delay to sniff for command output response [default=5]'
     )
 
-    # Logging options
-    parse.add_argument('--loglevel', help='log level, lowest is critical') # TODO
+    # general options
+    parse.add_argument('--debug', help='Debug verbosity.', action='store_true')
 
     # monitor interface
     parse.add_argument('iface', help='Wireless interface in monitor mode')
@@ -450,7 +462,7 @@ if __name__ == '__main__':
         )
         bl.c2()
     # detect mode
-    elif args.mon:
+    elif args.detect:
         bl = beaconleak('mon', args.iface, debug=args.debug)
         print(banner)
         # linux auto hop
