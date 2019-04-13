@@ -1,0 +1,19 @@
+     _                       __            _
+    | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
+    | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
+    |___|___|__,|___|___|_|_|_____|___|__,|_,_|
+                            by cjcase [test]
+ 
+[i] sniffing on channel 10
+
+[*] Surrounding beacon stats
+        [i] start time: 09.04.2019 21:23:54 GMT
+        [m] ended, seconds elapsed: 300.03361797332764
+[m] total beacons: 34664 (sanity check: 34664)
+[m] average beacon size: 264.26552042464806
+
+[*] Surrounding beacon stats
+        [i] start time:  09.04.2019 21:30:03
+        [m] ended, seconds elapsed: 300.0289258956909
+[m] total beacons: 19618 (sanity check: 19618)
+[m] average beacon size: 264.59547354470385

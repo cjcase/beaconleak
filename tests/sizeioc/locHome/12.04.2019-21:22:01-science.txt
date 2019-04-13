@@ -1,0 +1,79 @@
+
+     _                       __            _
+    | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
+    | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
+    |___|___|__,|___|___|_|_|_____|___|__,|_,_|
+                            by cjcase [test]
+
+    
+[*] Beacon Size IoC Experiment
+[*] start time: 12.04.2019 21:22:01 GMT
+        [i] channel:  1
+        [i] unique beacons: 9, size avg: 255.7782738095238, total beacons: 2016 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch1.pcap
+
+        [i] channel:  2
+        [i] unique beacons: 2, size avg: 341.74110671936756, total beacons: 506 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch2.pcap
+
+        [i] channel:  3
+        [i] unique beacons: 1, size avg: 211.0, total beacons: 7 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch3.pcap
+
+        [i] channel:  4
+        [i] unique beacons: 1, size avg: 296.0, total beacons: 1 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch4.pcap
+
+        [i] channel:  5
+        [i] unique beacons: 1, size avg: 244.0, total beacons: 6 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch5.pcap
+
+        [i] channel:  6
+        [i] unique beacons: 4, size avg: 252.22706766917292, total beacons: 1995 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch6.pcap
+
+        [i] channel:  7
+        [i] unique beacons: 3, size avg: 261.0247524752475, total beacons: 606 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch7.pcap
+
+        [i] channel:  8
+        [i] unique beacons: 1, size avg: 272.0, total beacons: 94 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch8.pcap
+
+        [i] channel:  9
+        [i] unique beacons: 1, size avg: 244.0, total beacons: 2 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch9.pcap
+
+        [i] channel:  10
+        [i] unique beacons: 2, size avg: 170.0, total beacons: 2 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch10.pcap
+
+        [i] channel:  11
+        [i] unique beacons: 3, size avg: 201.51084337349397, total beacons: 1245 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch11.pcap
+
+        [i] channel:  12
+        [i] unique beacons: 0, size avg: 0, total beacons: 0 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch12.pcap
+
+        [i] channel:  13
+        [i] unique beacons: 1, size avg: 275.0, total beacons: 273 (sanity:True)
+        [i] wrote packets to: 12.04.2019-21:22:01-ch13.pcap
+
+[*] results:
+
+{1: {'b_size_avg': 255.7782738095238, 'b_total': 2016, 'b_uniq': 9},
+ 2: {'b_size_avg': 341.74110671936756, 'b_total': 506, 'b_uniq': 2},
+ 3: {'b_size_avg': 211.0, 'b_total': 7, 'b_uniq': 1},
+ 4: {'b_size_avg': 296.0, 'b_total': 1, 'b_uniq': 1},
+ 5: {'b_size_avg': 244.0, 'b_total': 6, 'b_uniq': 1},
+ 6: {'b_size_avg': 252.22706766917292, 'b_total': 1995, 'b_uniq': 4},
+ 7: {'b_size_avg': 261.0247524752475, 'b_total': 606, 'b_uniq': 3},
+ 8: {'b_size_avg': 272.0, 'b_total': 94, 'b_uniq': 1},
+ 9: {'b_size_avg': 244.0, 'b_total': 2, 'b_uniq': 1},
+ 10: {'b_size_avg': 170.0, 'b_total': 2, 'b_uniq': 2},
+ 11: {'b_size_avg': 201.51084337349397, 'b_total': 1245, 'b_uniq': 3},
+ 12: {'b_size_avg': 0, 'b_total': 0, 'b_uniq': 0},
+ 13: {'b_size_avg': 275.0, 'b_total': 273, 'b_uniq': 1}}
+[*] results saved to file: 12.04.2019-21:22:01-science.json
+[*] end of experiment, duration: 781.8830275535583 seconds
