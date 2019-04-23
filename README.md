@@ -119,9 +119,11 @@ Copyright (C) 2019 Cj Case
 This tool was inspired by the "bridging the airgap" work of Mordecai Guri. 
 A previous description of the beacon stuffing method for exfiltration was 
 described by Tom Neaves.
-Basic implementation of this method predates beaconLeak, existing tool
- [PyExfil](https://github.com/ytisf/PyExfil/) by Yuval Nativ. 
-This project was developed as a research project for Tallinn University of 
+[PyExfil](https://github.com/ytisf/PyExfil/) by Yuval Nativ has a
+basic implementation of this method that predates our tool, its method has been
+added to our detection functionality. 
+
+This project was developed as a research project for Tallinn University of
 Technology's Cyber Security Master programme and funded by the Dora Plus fund.
 
 ![Dora Plus](http://haridus.archimedes.ee/sites/default/files/styles/medium/public/eu_regional_development_fund_horizontal_0.jpg)
