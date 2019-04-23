@@ -29,8 +29,7 @@ if0 = "wi7mon"
 
 # test file
 #t_file = "/etc/shadow"
-#t_file = "tests/distanceTestFile"
-t_file = '/tmp/test'
+t_file = "tests/distanceTestFile"
 
 # test beacon
 ssid = 'beaconLeak'
