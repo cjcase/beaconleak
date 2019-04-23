@@ -31,7 +31,7 @@ all data encrypted on transit.
 *These instructions are for Linux based systems only, other platforms are* 
 *partially supported, please check in the repository.*
 
-1. Set up a virtual environment
+1. Set up a Python virtual environment
 
 ```
 # python -m venv bl
@@ -43,10 +43,10 @@ all data encrypted on transit.
 # source bl/bin/activate
 ```
 
-3. Install the Python Library Requirements
+3. Install the Python libraries dependencies to the virtual environment
 
 ```
-pip install -r requirements.txt
+(bl)# pip install -r requirements.txt
 ```
 
 4. ???
