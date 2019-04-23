@@ -21,7 +21,39 @@ all data encrypted on transit.
 * leak mode: command channel and data exfiltration
 * detect mode: detect the use of this method (multiple tool detection)
 
+## Requirements
+
+* Root privileges
+* Python 3 with pip
+* Packet Injection capable Wireless NIC
+
+## Installation
+*These instructions are for Linux based systems only, other platforms are* 
+*partially supported, please check in the repository.*
+
+1. Set up a virtual environment
+
+```
+# python -m venv bl
+```
+
+2. Load Python virtual environment
+
+```
+# source bl/bin/activate
+```
+
+3. Install the Python Library Requirements
+
+```
+pip install -r requirements.txt
+```
+
+4. ???
+5. Profit! 
+
 ## Usage
+
 ```
 usage: beaconleak.py [-h] (--leak | --detect | --c2) [--pcap PCAP [PCAP ...]]
                      [--autohop] [--loglevel LOGLEVEL] [--covert] [--psk PSK]
@@ -92,4 +124,4 @@ Basic implementation of this method predates beaconLeak, existing tool
 This project was developed as a research project for Tallinn University of 
 Technology's Cyber Security Master programme and funded by the Dora Plus fund.
 
-![Dora Plus](http://haridus.archimedes.ee/sites/default/files/EU_Regional_Development_Fund_horizontal.jpg)
+![Dora Plus](http://haridus.archimedes.ee/sites/default/files/styles/medium/public/eu_regional_development_fund_horizontal_0.jpg)
