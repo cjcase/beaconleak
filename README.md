@@ -116,25 +116,25 @@ In this mode, the interface is still a required argument but ignored.
 
 ### beaconLeak in C2 mode
 This mode emulates a trivial shell, will allow you to communicate with any
-target that share the same PSK, like the built-in default.
+target that shares the same PSK, like the default built-in PSK.
 
 ```
 (bl)# python beaconleak.py --c2 wlan0mon 
 ```
 
 If you'd like to be more sneaky, you can toggle the covert mode, which will
-take the noisiest beacons in the surroundings and mimimc it. You can also use
-your own PSK for encryption, but make sure the target is also started with this
-passphrase. beaconLeak will use pyNaCl's KDF to generate a strong key from 
+search for the noisiest beacon in your surroundings and mimimc it. You can also 
+use your own PSK for encryption, but make sure the target is also started with 
+this passphrase. beaconLeak will use pyNaCl's KDF to generate a strong key from 
 this string.
 
 ```
 (bl)# python beaconleak.py --covert --psk "secret sauce" --c2 wlan0mon
 ```
 
-The way the covert channel works, there needs to be a delay where C2 mode 
-sniffs packets to catch the target's output, this delay can be changed with the 
-```--delay``` flag, number is seconds. If you don't care about the output, 
+The covert channel is designed to be two-way, so it needs a delay in seconds 
+where C2 mode will sniff packets to receive the target's output. This delay can 
+be modified with the ```--delay``` flag. If you don't care about the output, 
 instead of using a 0 delay, you can prepend your commands with the '!'
 character.
 
