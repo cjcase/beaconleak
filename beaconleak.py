@@ -377,11 +377,12 @@ class beaconleak():
         best = [0]
         for bssid, val in self.beacons.items():
             rssi, frame = val
+            ssid = frame.info.decode('utf-8')
             if rssi > check:
                 check = rssi
                 best.pop()
                 best.append(frame)
-            print("\t{} | {} | {}".format(frame.info.decode('utf-8'), bssid, rssi))
+            print(f"\t{rssi} | {bssid} | {ssid}")
         # imitate it
         best_frame = best.pop()
         # edge cases
