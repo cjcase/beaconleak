@@ -408,7 +408,11 @@ class beaconleak():
         if frame.haslayer(Dot11Beacon):
             ssid = frame.info.decode('utf-8')
             bssid = frame.addr2
-            channel = int(ord(frame[Dot11Elt:3].info))
+            try:
+                # TODO: bug on certain beacons, find general solution
+                channel = int(ord(frame[Dot11Elt:3].info))
+            except Exception as e:
+                channel = 0
             elements = frame.getlayer(Dot11Elt)
             # TODO add MAC Adress validation detection case            
             # IoC: pyExfil defaults
